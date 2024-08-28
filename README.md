@@ -4,6 +4,10 @@
 
 This GitHub repository contains the source code for an augmented reality (AR) application designed to support lower limb rehabilitation. The application leverages AR technology to create an interactive and engaging environment for patients undergoing rehabilitation, aiming to improve their recovery process through visual and interactive feedback.
 
+## Video demo application
+
+[![YouTube](http://i.ytimg.com/vi/fpK5MiNjmME/hqdefault.jpg)](https://www.youtube.com/watch?v=fpK5MiNjmME)
+
 ## Code Summary
 
 The repository includes several scripts that contribute to the functionality of the AR application. Two key scripts are `detections.cs` and `collisions.cs`, each playing a specific role in the application's operation.
