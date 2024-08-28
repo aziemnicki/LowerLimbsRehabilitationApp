@@ -83,17 +83,19 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
     private GameObject pause_menu;
     private GameObject start_menu;
     private GameObject finish;
-    private GameObject hole_prefab;
+    public GameObject hole_prefab;
     private GameObject instructions;
+    private GameObject warning;
 
     public float hip_width;
     private bool first_step_reached;
     private bool is_collision = false;
+    private bool hole_collision = false;
     private bool isPaused = false;
     private bool isStarted = false;
     private bool hasObstacles = false;
-    private bool directionSet = false;
-
+    private bool directionSet = true;
+    private bool isCoroutineRunning = false;
     private string triggeringObject;
     private int step_counter;
     private int hole_counter;
@@ -151,6 +153,7 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         start_menu = GameObject.Find("StartMenu");
         finish = GameObject.Find("Finish");
         instructions = GameObject.Find("Instructions");
+        warning = GameObject.Find("Warning");
         var panel = GameObject.Find("StartPanel");
         pinchSlider = panel.GetComponentInChildren<PinchSlider>();
         pinchSlider.OnValueUpdated.AddListener(UpdateText);
@@ -161,6 +164,7 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         left_leg.SetActive(false);
         right_leg.SetActive(false);
         pause_menu.SetActive(false);
+        warning.SetActive(false);
         start_menu.SetActive(true);
         finish.SetActive(false);
         instructions.SetActive(false);
@@ -175,15 +179,15 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         textMesh = _.GetComponent<TextMeshPro>();
         stepstext = panel.GetComponentInChildren<TextMeshProUGUI>();
         stepstext.text = $"Choose number of steps: 3"; // Format to 2 decimal places
-        PositionObjectInFrontOfCamera(start_menu);
        
         meshObserver = CoreServices.GetSpatialAwarenessSystemDataProvider<IMixedRealitySpatialAwarenessMeshObserver>();
         if (meshObserver != null)
         {
             meshObserver.DisplayOption = SpatialAwarenessMeshDisplayOptions.Visible;
         }
-        
-        StartCoroutine(wait(2.0f));
+
+        // StartCoroutine(wait(2.0f));
+        StartCoroutine(waitForSetup());
         mainCamera = Camera.main;
         StartCoroutine(waitForStart());
 
@@ -191,11 +195,19 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
 
     private IEnumerator wait(float time)
     {
+        isCoroutineRunning = true;
         isPaused = true;
         directionSet = false;
         yield return new WaitForSeconds(time);
+        UpdateDirection();
         isPaused = false;
         directionSet = true;
+        isCoroutineRunning = false;
+    }
+    private IEnumerator waitForSetup()
+    {
+        yield return new WaitUntil(() => mainCamera !=null);
+        PositionObjectInFrontOfCamera(start_menu);       
     }
     private IEnumerator waitForStart()
     {
@@ -230,9 +242,10 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         
     }
     
-    public void SetObstacles()
+    public void ToggleObstacles()
     {
-        hasObstacles = true;
+        hasObstacles = !hasObstacles;
+        Debug.Log($"Set Obstacles to {hasObstacles}");
     }
 
     public void ReturnToMenu()
@@ -242,8 +255,9 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         pause_menu.SetActive(false); // Hide the pause menu
         finish.SetActive(false);
         PositionObjectInFrontOfCamera(start_menu);
-        StartCoroutine(wait(1.0f));
+        // StartCoroutine(wait(1.0f));
         start_menu.SetActive(true);
+        StartCoroutine(waitForStart());
     }
 
     private void ResetScene()
@@ -251,6 +265,9 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         foreach ( GameObject obj in cylinderObjects)
         {
             Destroy(obj);
+        }
+        foreach (var gameObj in GameObject.FindGameObjectsWithTag("hole")){
+            Destroy(gameObj);
         }
         cylinderObjects.Clear();
         left_leg.SetActive(false);
@@ -417,15 +434,29 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
     {
         // Renderer renderer = cubeObject.GetComponent<Renderer>();
         // renderer.material.mainTexture = annotatedTexture;
-
         // PositionCubeObjectInFrontOfCamera();
-        // if(isPaused)
-        // {
-        // PositionObjectInFrontOfCamera(start_menu);
-        // PositionObjectInFrontOfCamera(pause_menu);
-        // PositionObjectInFrontOfCamera(finish);
-        // }
-        if (directionSet) PositionObjectInFrontOfCamera(instructions);
+
+        if (hole_collision)
+        {
+            PositionObjectInFrontOfCamera(warning);
+            warning.transform.position += Vector3.up.normalized * 0.15f;
+            warning.SetActive(true);
+        }
+        else 
+        { 
+            warning.SetActive(false); 
+        }
+
+        if (!directionSet)
+        {
+            PositionObjectInFrontOfCamera(instructions);
+            instructions.SetActive(true);
+        }
+        else
+        {
+            instructions.SetActive(false);
+
+        }
         if (textMesh != null)
         {
             var curr_steps = step_counter < 0 ? "step on start" : step_counter.ToString();
@@ -468,7 +499,7 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
                 float distanceFromCamera = 0.6f; // Set this to the desired distance from the camera
                 Vector3 cameraForward = mainCamera.transform.forward;
                 Vector3 cameraup = mainCamera.transform.up;
-                Vector3 newPosition = mainCamera.transform.position + cameraForward * distanceFromCamera + cameraup * -0.08f ;  //Set camera slightly on the right of the image
+                Vector3 newPosition = mainCamera.transform.position + cameraForward * distanceFromCamera + cameraup * -0.08f ;  //Set camera slightly upper of the image
                 obj.transform.position = newPosition;
                 obj.transform.LookAt(mainCamera.transform);
                 obj.transform.Rotate(0, 180, 0);
@@ -679,7 +710,7 @@ private void ParseYoloPoseOutput(TensorFloat tensor, float confidenceThreshold, 
     //     }
     // }
 
-public Vector3 GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMatrix_local, Matrix4x4 projectionMatrix_local)
+public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMatrix_local, Matrix4x4 projectionMatrix_local)
 {
     var x_offset = (cameraResolutionWidth - inferenceImgSize) / 2;
     var y_offset = (cameraResolutionHeight - inferenceImgSize) / 2;
@@ -715,15 +746,19 @@ public Vector3 GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2World
     {   
         if (step_counter % 2 == 0) 
         {
-            StartCoroutine(wait(2.0f));
-            UpdateDirection();   
+            StartCoroutine(wait(4.0f));
+                while(!isCoroutineRunning)
+                {
+                    return;
+                }
         }
 
         if (hasObstacles)
         {
-            if (hole_counter + 2 < step_counter && GameObject.Find("Hole"))
+            GameObject hole = GameObject.FindGameObjectWithTag("hole");
+            if (hole_counter + 3 <= step_counter && hole != null)
             {
-                Destroy(GameObject.Find("Hole"));
+                Destroy(hole);
                 hole_counter = 0;
                 random_number = UnityEngine.Random.Range(3, 6) + step_counter;
             }
@@ -739,7 +774,6 @@ public Vector3 GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2World
         DisplayStep(newCylinderCenter, plain_position);
         first_step_reached = false;
     }
-    return Vector3.zero;
 }
 
     private void UpdateDirection()
@@ -748,6 +782,7 @@ public Vector3 GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2World
         update_vector.y = 0.0f;
         forward_direction = update_vector.normalized;
         sideward_direction = Vector3.Cross(-forward_direction, Vector3.up).normalized;
+        Debug.Log(sideward_direction);
     }
 
     private void DisplayFirstStep(Vector3 center,  Vector3 mesh_position)
@@ -781,7 +816,7 @@ public Vector3 GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2World
     {
         hole_counter = step_counter;
         Vector3 hole_center = center;        
-        hole_center.y = mesh_position.y - 0.20f;
+        hole_center.y = mesh_position.y;
         GameObject hole =  Instantiate(hole_prefab, hole_center, Quaternion.identity);
         Debug.Log($"HOLE ADDED");
     }
@@ -800,11 +835,21 @@ public Vector3 GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2World
         }
     }
 
+    public void SetHoleCollision(bool value)
+    {
+        hole_collision = value;
+    }
+
     private void CheckStepsCompleted()
     {
         if (step_counter >= steps_to_finish)
         {
             PositionObjectInFrontOfCamera(finish);
+            finish.transform.rotation = Quaternion.LookRotation(forward_direction, Vector3.up);
+            // finish.transform.Rotate(90, 0, 90);
+            Vector3 finish_position = finish.transform.position + forward_direction * 0.5f;
+            finish_position.y = plain_position.y + 1.1f;
+            finish.transform.position = finish_position;
             finish.SetActive(true);
             isPaused = true;
             ResetScene();
