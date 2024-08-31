@@ -46,7 +46,6 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
     public ModelAsset modelAsset;
     private Model runtimeModel;
     private IWorker worker;
-    public IBackend backend;
     private TensorFloat resultTensor;
     private TextMeshPro textMesh;
     private TextMeshProUGUI stepstext;
@@ -54,7 +53,6 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
     private Texture2D pictureTexture;
     private Texture2D inputTexture;
     private Texture2D annotatedTexture;
-    private Texture2D croppedTexture;
 
     private Camera mainCamera;
     private HoloLensCameraStream.Resolution resolution;
@@ -67,13 +65,10 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
     Matrix4x4 camera2WorldMatrix_local;
     Matrix4x4 projectionMatrix_local;
 
-    public Material laserMaterial;
-
     private IMixedRealitySpatialAwarenessMeshObserver meshObserver;
     private List<PoseEstimationResult> results;
     private List<Tuple<GameObject, Renderer>> labels;
-
-    // private GameObject cubeObject;
+    private GameObject cubeObject;
     private List<GameObject> cylinderObjects = new List<GameObject>();
     public GameObject cylinderPrefab;
     public GameObject left_leg_prefab;
@@ -96,13 +91,11 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
     private bool hasObstacles = false;
     private bool directionSet = true;
     private bool isCoroutineRunning = false;
-    private string triggeringObject;
     private int step_counter;
     private int hole_counter;
     public int steps_to_finish = 5;
     private int random_number;
     private PinchSlider pinchSlider;
-    private float min_distance = 0.3f;
     private float step_length = 0.4f;
     private Vector3 forward_direction;
     private Vector3 sideward_direction;
@@ -133,6 +126,7 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
 #endif
         CameraStreamHelper.Instance.GetVideoCaptureAsync(OnVideoCaptureCreated);
 
+        // load the model with GPU support
         runtimeModel = ModelLoader.Load(modelAsset);
         if (runtimeModel != null)
         {
@@ -144,11 +138,11 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
             Debug.LogError("Model not initialized properly.");
         }
         
+        // initialize objects inside scene, 
         inputTexture = new Texture2D(imgSizeWidth, imgSizeHeight, TextureFormat.RGB24, false);
-
         results = new List<PoseEstimationResult>();
         labels = new List<Tuple<GameObject, Renderer>>();
-        // cubeObject = GameObject.Find("Cube");
+        cubeObject = GameObject.Find("Cube");
         pause_menu = GameObject.Find("PauseMenu");
         start_menu = GameObject.Find("StartMenu");
         finish = GameObject.Find("Finish");
@@ -158,9 +152,11 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         pinchSlider = panel.GetComponentInChildren<PinchSlider>();
         pinchSlider.OnValueUpdated.AddListener(UpdateText);
 
-
+        // instanciate prefabs
         left_leg = Instantiate(left_leg_prefab, new Vector3(0, 0, 0), Quaternion.identity);
         right_leg = Instantiate(right_leg_prefab, new Vector3(0, 0, 0), Quaternion.identity);
+        
+        // set visibilities of UI canvas
         left_leg.SetActive(false);
         right_leg.SetActive(false);
         pause_menu.SetActive(false);
@@ -170,29 +166,32 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         instructions.SetActive(false);
         isPaused = true;
 
+        // initial values
         hip_width = 0.3f;
         step_counter = -2;
         random_number = UnityEngine.Random.Range(3, 6);
         CoreServices.InputSystem?.RegisterHandler<IMixedRealityGestureHandler>(this);
 
+        // get text from canvas 
         var _ = GameObject.Find("Prediction");
         textMesh = _.GetComponent<TextMeshPro>();
         stepstext = panel.GetComponentInChildren<TextMeshProUGUI>();
-        stepstext.text = $"Choose number of steps: 3"; // Format to 2 decimal places
+        stepstext.text = $"Choose number of steps: 3"; 
        
+        // setup mesh of spacial mapping
         meshObserver = CoreServices.GetSpatialAwarenessSystemDataProvider<IMixedRealitySpatialAwarenessMeshObserver>();
         if (meshObserver != null)
         {
             meshObserver.DisplayOption = SpatialAwarenessMeshDisplayOptions.Visible;
         }
 
-        // StartCoroutine(wait(2.0f));
         StartCoroutine(waitForSetup());
         mainCamera = Camera.main;
         StartCoroutine(waitForStart());
 
     }
 
+    // wait for updating next direction fo cylinders, stop other functions for fixed amount of seconds
     private IEnumerator wait(float time)
     {
         isCoroutineRunning = true;
@@ -204,17 +203,22 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         directionSet = true;
         isCoroutineRunning = false;
     }
+
+    // Wait for camera image setup
     private IEnumerator waitForSetup()
     {
         yield return new WaitUntil(() => mainCamera !=null);
         PositionObjectInFrontOfCamera(start_menu);       
     }
+
+    // Stop the program until start button is clicked
     private IEnumerator waitForStart()
     {
         yield return new WaitUntil(() => isStarted);
         StartCoroutine(DetectWebcam());
     }
 
+    // Initialize detection and first cylinders, show spheres on legs, hide menu
     public void SetStart()
     {
         cylinderObjects.Clear();
@@ -242,10 +246,10 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         
     }
     
+    // Set obstacles rendering by clicking ToggleButton
     public void ToggleObstacles()
     {
         hasObstacles = !hasObstacles;
-        Debug.Log($"Set Obstacles to {hasObstacles}");
     }
 
     public void ReturnToMenu()
@@ -255,11 +259,11 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         pause_menu.SetActive(false); // Hide the pause menu
         finish.SetActive(false);
         PositionObjectInFrontOfCamera(start_menu);
-        // StartCoroutine(wait(1.0f));
         start_menu.SetActive(true);
         StartCoroutine(waitForStart());
     }
 
+    // Reset scene objects and variables after returning to menu
     private void ResetScene()
     {
         foreach ( GameObject obj in cylinderObjects)
@@ -275,6 +279,7 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         step_counter = -2;
     }
 
+    // Pause model inference for FPS optimization
     private void TapPause()
     {
         if (isStarted)
@@ -288,12 +293,12 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         }
     }
 
+    // Change pause state
     public void TogglePause()
     {
         isPaused = !isPaused;
         if (!isPaused)
         {
-            Time.timeScale = 1f; // Resume the game
             pause_menu.SetActive(false); // Hide the pause menu
         }
     }
@@ -308,6 +313,7 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         worker.Dispose();
     }
 
+    // Get value of slider, set number of steps to finish training
     public void UpdateText(SliderEventData eventData)
     {
         // Get the current value of the slider
@@ -356,7 +362,6 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
 #if WINDOWS_UWP
 #if XR_PLUGIN_OPENXR
         CameraStreamHelper.Instance.SetNativeISpatialCoordinateSystem(_spatialCoordinateSystem);
-
 #endif
 #endif
 
@@ -430,12 +435,16 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         }, false);
     }
 
+    // Executes every frame, positioning UI objects in front of camera, makes mapping
     void Update()
-    {
-        // Renderer renderer = cubeObject.GetComponent<Renderer>();
-        // renderer.material.mainTexture = annotatedTexture;
-        // PositionCubeObjectInFrontOfCamera();
-
+    {   
+        if (cubeObject != null )
+        {
+            Renderer renderer = cubeObject.GetComponent<Renderer>();
+            renderer.material.mainTexture = annotatedTexture;
+            PositionObjectInFrontOfCamera(cubeObject);
+        }
+        
         if (hole_collision)
         {
             PositionObjectInFrontOfCamera(warning);
@@ -455,13 +464,14 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         else
         {
             instructions.SetActive(false);
-
         }
+
         if (textMesh != null)
         {
             var curr_steps = step_counter < 0 ? "step on start" : step_counter.ToString();
             textMesh.text = $"Results: {results.Count}\n current steps: {curr_steps}";
         }
+
         foreach (SpatialAwarenessMeshObject meshObject in meshObserver.Meshes.Values)
         {
             plain_position = meshObject.Filter.mesh.bounds.center;
@@ -470,25 +480,6 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
         }
     }
 
-    // private void PositionCubeObjectInFrontOfCamera()
-    // {
-    //     if (cubeObject != null)
-    //     {
-    //         Camera mainCamera = Camera.main;
-    //         if (mainCamera != null)
-    //         {
-    //             // Set the cube position in front of the camera at a fixed distance
-    //             float distanceFromCamera = 0.7f; // Set this to the desired distance from the camera
-    //             Vector3 cameraForward = mainCamera.transform.forward;
-    //             Vector3 cameraRight = mainCamera.transform.right;
-    //             Vector3 newPosition = mainCamera.transform.position + cameraForward * distanceFromCamera + cameraRight * 0.15f;  //Set camera slightly on the right of the image
-    //             cubeObject.transform.position = newPosition;
-    //             // Make the cube face the camera
-    //             cubeObject.transform.LookAt(mainCamera.transform);
-    //         }
-    //     }
-    // }
-
     private void PositionObjectInFrontOfCamera(GameObject obj)
     {
         if (obj != null)
@@ -496,80 +487,95 @@ public class Detection : MonoBehaviour, IMixedRealityGestureHandler
             Camera mainCamera = Camera.main;
             if (mainCamera != null)
             {
-                float distanceFromCamera = 0.6f; // Set this to the desired distance from the camera
+                // Set this to the desired distance from the camera
+                float distanceFromCamera = 0.6f; 
                 Vector3 cameraForward = mainCamera.transform.forward;
                 Vector3 cameraup = mainCamera.transform.up;
-                Vector3 newPosition = mainCamera.transform.position + cameraForward * distanceFromCamera + cameraup * -0.08f ;  //Set camera slightly upper of the image
-                obj.transform.position = newPosition;
-                obj.transform.LookAt(mainCamera.transform);
-                obj.transform.Rotate(0, 180, 0);
+                Vector3 cameraRight = mainCamera.transform.right;
+                // Set cube with image slightly on the right of the image
+                if (obj == cubeObject)
+                {
+                    Vector3 newPosition = mainCamera.transform.position + cameraForward * distanceFromCamera + cameraRight * 0.15f;  
+                    obj.transform.position = newPosition;
+                    obj.transform.LookAt(mainCamera.transform);
+                }
+                else
+                //Set object slightly upper of the image
+                {
+                    Vector3 newPosition = mainCamera.transform.position + cameraForward * distanceFromCamera + cameraup * -0.08f ;  
+                    obj.transform.position = newPosition;
+                    obj.transform.LookAt(mainCamera.transform);
+                    obj.transform.Rotate(0, 180, 0);
+                }
             }
         }
     }
 
-public IEnumerator DetectWebcam()
-{
-    List<PoseEstimationResult> tmpResults = new List<PoseEstimationResult>();
-    while (true)
+    // main function for YOLOv8 inference, executes worker in GPU, returns detected keypoints positions on image
+    public IEnumerator DetectWebcam()
     {
-        if (pictureTexture && !isPaused)
+        List<PoseEstimationResult> tmpResults = new List<PoseEstimationResult>();
+        while (true)
         {
-            camera2WorldMatrix_local = camera2WorldMatrix;
-            projectionMatrix_local = projectionMatrix;
-            CropTexture(imgSizeWidth, imgSizeHeight);
-
-            using (TensorFloat inputTensor = TextureConverter.ToTensor(inputTexture))
+            if (pictureTexture && !isPaused)
             {
-                TensorFloat inputTensorResized = inputTensor;
-                IEnumerator schedule = worker.ExecuteLayerByLayer(inputTensorResized);
-                // Execute the model layer by layer over multiple frames
-                int it = 0;
-                while (schedule.MoveNext())
+                camera2WorldMatrix_local = camera2WorldMatrix;
+                projectionMatrix_local = projectionMatrix;
+                CropTexture(imgSizeWidth, imgSizeHeight);
+
+                // transfer image from camera to tensor on GPU
+                using (TensorFloat inputTensor = TextureConverter.ToTensor(inputTexture))
                 {
-                    if (++it % 30 == 0)
+                    TensorFloat inputTensorResized = inputTensor;
+                    IEnumerator schedule = worker.ExecuteLayerByLayer(inputTensorResized);
+                    // Execute the model layer by layer over multiple frames
+                    int it = 0;
+                    while (schedule.MoveNext())
                     {
-                        yield return null; // Yield control back to the main thread, allowing for smooth framerates
-                    }
-                }
-
-                using (TensorFloat resultTensor = worker.PeekOutput(runtimeModel.outputs[0].name) as TensorFloat)
-                {
-                    using (TensorFloat downloadedTensorCopy = resultTensor.ReadbackAndClone())
-                    {
-                        tmpResults.Clear();
-                        results.Clear();
-                        confidenceThreshold = 0.3f;
-
-                        ParseYoloPoseOutput(downloadedTensorCopy, confidenceThreshold, tmpResults);
-                        results = NonMaxSuppression(0.6f, tmpResults);
-
-                        // annotatedTexture = inputTexture;
-                        // showKeypoints(results);
-
-                        // var dets = "";
-                        // foreach (var l in results)
-                        // {
-                        //     dets += $"{l}\n";
-                        // }
-                        // Debug.Log(dets);
-
-                        if (results.Count >= 1)
+                        if (++it % 30 == 0)
                         {
-                            GenerateNextStep(results[0], camera2WorldMatrix_local, projectionMatrix_local);
+                            yield return null; // Yield control back to the main thread, allowing for smooth framerates
+                        }
+                    }
+                    // transfer model results from GPU to CPU
+                    using (TensorFloat resultTensor = worker.PeekOutput(runtimeModel.outputs[0].name) as TensorFloat)
+                    {
+                        using (TensorFloat downloadedTensorCopy = resultTensor.ReadbackAndClone())
+                        {
+                            tmpResults.Clear();
+                            results.Clear();
+                            confidenceThreshold = 0.3f;
+                            ParseYoloPoseOutput(downloadedTensorCopy, confidenceThreshold, tmpResults);
+                            // execu NMS with 60% confidence
+                            results = NonMaxSuppression(0.6f, tmpResults);
+                            // only for validation, marks keypoint in texture
+                            // annotatedTexture = inputTexture;
+                            // showKeypoints(results);
+
+                            // var dets = "";
+                            // foreach (var l in results)
+                            // {
+                            //     dets += $"{l}\n";
+                            // }
+
+                            if (results.Count >= 1)
+                            {
+                                GenerateNextStep(results[0], camera2WorldMatrix_local, projectionMatrix_local);
+                            }
                         }
                     }
                 }
+                yield return null;
             }
-            yield return null;
-        }
-        else
-        {
-            yield return null;
+            else
+            {
+                yield return null;
+            }
         }
     }
-}
 
-private void ParseYoloPoseOutput(TensorFloat tensor, float confidenceThreshold, List<PoseEstimationResult> poseResults)
+    // get output in a tensor format, iterate to return list of pose result objects
+    private void ParseYoloPoseOutput(TensorFloat tensor, float confidenceThreshold, List<PoseEstimationResult> poseResults)
 {
     for (int batch = 0; batch < tensor.shape[0]; batch++)
     {
@@ -623,6 +629,7 @@ private void ParseYoloPoseOutput(TensorFloat tensor, float confidenceThreshold, 
         return keypoints;
     }
 
+    // perform intersection over union for detected Bbox
     private float IoU(Rect boundingBoxA, Rect boundingBoxB)
     {
         float intersectionArea = Mathf.Max(0, Mathf.Min(boundingBoxA.xMax, boundingBoxB.xMax) - Mathf.Max(boundingBoxA.xMin, boundingBoxB.xMin)) *
@@ -638,6 +645,7 @@ private void ParseYoloPoseOutput(TensorFloat tensor, float confidenceThreshold, 
         return intersectionArea / unionArea;
     }
 
+    // reject Bboxes with IoU lower than confidence threshold
     private List<PoseEstimationResult> NonMaxSuppression(float threshold, List<PoseEstimationResult> boxes)
     {
         var results = new List<PoseEstimationResult>();
@@ -715,25 +723,24 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
     var x_offset = (cameraResolutionWidth - inferenceImgSize) / 2;
     var y_offset = (cameraResolutionHeight - inferenceImgSize) / 2;
 
-    Keypoint keypoint_left = det.Keypoints[2];
-    Keypoint keypoint_left_fr = det.Keypoints[5];
-    Keypoint keypoint_right = det.Keypoints[3];
-    Keypoint keypoint_right_fr = det.Keypoints[4];
-    
-    //left leg keypoints
-    Vector3 keypoint_left_World = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2(keypoint_left.X + x_offset, keypoint_left.Y + y_offset));
-    Vector3 keypoint_left_fr_World = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2(keypoint_left_fr.X + x_offset, keypoint_left_fr.Y + y_offset));
-    //right leg keypoints
-    Vector3 keypoint_right_World = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2(keypoint_right.X + x_offset, keypoint_right.Y + y_offset));
-    Vector3 keypoint_right_fr_World = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2(keypoint_right_fr.X + x_offset, keypoint_right_fr.Y + y_offset));
+    Keypoint keypoint_left = det.Keypoints[2];      // left-foot keypoint
+    Keypoint keypoint_left_fr = det.Keypoints[5];   // left-foot-front keypoint
+    Keypoint keypoint_right = det.Keypoints[3];     // right-foot keypoint
+    Keypoint keypoint_right_fr = det.Keypoints[4];  // right-foot-front keypoint
 
-    // Vector3 direction_left = (keypoint_left_fr_World - keypoint_left_World).normalized;
-    // Vector3 direction_right = (keypoint_right_fr_World - keypoint_right_World).normalized;    
+    Vector2 left_point_on_image = new Vector2(keypoint_left_fr.X + x_offset, keypoint_left_fr.Y + y_offset);
+    Vector2 right_point_on_image = new Vector2(keypoint_right_fr.X + x_offset, keypoint_right_fr.Y + y_offset);
+    
+    // left leg keypoints in 3D World coordinates
+    Vector3 keypoint_left_fr_World = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, left_point_on_image);
+    // right leg keypoints in 3D World coordinates
+    Vector3 keypoint_right_fr_World = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, right_point_on_image);
+    // relative positions moved to the camera position
     Vector3 left_leg_position = mainCamera.transform.position + keypoint_left_fr_World;
     Vector3 right_leg_position = mainCamera.transform.position + keypoint_right_fr_World;
+    // Adjust hight to mapped floor 
     left_leg_position.y = plain_position.y - 0.05f;
     left_leg.transform.position = left_leg_position;
-    
     right_leg_position.y = plain_position.y - 0.05f;
     right_leg.transform.position = right_leg_position;
 
@@ -744,6 +751,7 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
     
     if (first_step_reached)
     {   
+        // after each 2 steps blocks code for updating direction of next steps
         if (step_counter % 2 == 0) 
         {
             StartCoroutine(wait(4.0f));
@@ -752,7 +760,7 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
                     return;
                 }
         }
-
+        // generate next obstacle positions 
         if (hasObstacles)
         {
             GameObject hole = GameObject.FindGameObjectWithTag("hole");
@@ -769,6 +777,7 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
                 DisplayHole(newHoleCenter, plain_position);
             }
         }
+        // set next cylinder position, for left leg with -, for right with + hip_width
         float sidewardAdjustment = (step_counter % 2 == 0) ? hip_width : -hip_width;
         newCylinderCenter += forward_direction * step_length + sideward_direction * sidewardAdjustment;
         DisplayStep(newCylinderCenter, plain_position);
@@ -776,15 +785,16 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
     }
 }
 
+    // Set forward direction vector for path changing 
     private void UpdateDirection()
     {
         Vector3 update_vector = mainCamera.transform.forward;
         update_vector.y = 0.0f;
         forward_direction = update_vector.normalized;
         sideward_direction = Vector3.Cross(-forward_direction, Vector3.up).normalized;
-        Debug.Log(sideward_direction);
     }
 
+    // Initiate 2 cylinders positions in front of camera, set first directions
     private void DisplayFirstStep(Vector3 center,  Vector3 mesh_position)
     {
         Vector3 cameraLeft = -mainCamera.transform.right;
@@ -801,31 +811,27 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
         sideward_direction = (firstPosition_right - firstPosition_left).normalized;
         forward_direction = Vector3.Cross(sideward_direction, Vector3.up).normalized;
 
-        Debug.Log($"FIRST CYLINDER ADDED");
     }
+
+    // Sets next cylinder height and make new instance of it
     private void DisplayStep(Vector3 center,  Vector3 mesh_position)
     {
         Vector3 cylinder_center = center;        
         cylinder_center.y = mesh_position.y - 0.10f;
         GameObject cylinder =  Instantiate(cylinderPrefab, cylinder_center, Quaternion.identity);
         cylinderObjects.Add(cylinder);
-        Debug.Log($"NEW CYLINDER ADDED");
     }
 
+    // Sets next obstacle height and make new instance of it
     private void DisplayHole(Vector3 center,  Vector3 mesh_position)
     {
         hole_counter = step_counter;
         Vector3 hole_center = center;        
         hole_center.y = mesh_position.y;
         GameObject hole =  Instantiate(hole_prefab, hole_center, Quaternion.identity);
-        Debug.Log($"HOLE ADDED");
     }
 
-    public void GetTriggeringObjectName(string name)
-    {
-        triggeringObject = name;
-    }
-
+    // Checks from collision.cs script, toggles bool collision with cylinder
     public void SetIsCollision(bool value)
     {
         is_collision = value;
@@ -835,18 +841,19 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
         }
     }
 
+    // Checks from HoleCollision.cs script, toggles bool collision with obstacle
     public void SetHoleCollision(bool value)
     {
         hole_collision = value;
     }
 
+    // In each step checks step_counter. makes finish visible and resets scene 
     private void CheckStepsCompleted()
     {
         if (step_counter >= steps_to_finish)
         {
             PositionObjectInFrontOfCamera(finish);
             finish.transform.rotation = Quaternion.LookRotation(forward_direction, Vector3.up);
-            // finish.transform.Rotate(90, 0, 90);
             Vector3 finish_position = finish.transform.position + forward_direction * 0.5f;
             finish_position.y = plain_position.y + 1.1f;
             finish.transform.position = finish_position;
@@ -856,6 +863,7 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
         }
     }
 
+    // delets last cylinder added to the scene, initialize finish check
     public void DeleteOldestStep()
     {
         if (cylinderObjects.Count >= 2)
@@ -864,100 +872,29 @@ public void GenerateNextStep(PoseEstimationResult det, Matrix4x4 camera2WorldMat
             cylinderObjects.RemoveAt(0);
             Destroy(oldestCircle);
             step_counter += 1;
-            Debug.Log($"stepcounter {step_counter}");
             CheckStepsCompleted();
         }
     }
 
-    public Vector3 shootLaserFrom(Vector3 from, Vector3 direction, float length, Material mat = null)
+    // Get pixels from texture, crop resolution of image and flip pixel horizontally
+    private void CropTexture(int cropWidth, int cropHeight)
     {
-        Ray ray = new Ray(from, direction);
-        Vector3 to = from + length * direction;
+        int centerX = pictureTexture.width / 2 - cropWidth / 2;
+        int centerY = pictureTexture.height / 2 - cropHeight / 2;
+        Color[] pixels = pictureTexture.GetPixels(centerX, centerY, cropWidth, cropHeight);
+        int totalPixels = cropWidth * cropHeight;
+        Color[] flippedPixels = new Color[totalPixels];
+        // Flip the pixels horizontally
+        for (int y = 0; y < cropHeight; y++)
+        {
+            int sourceIndex = y * cropWidth;
+            int destIndex = (cropHeight - 1 - y) * cropWidth;
+            Array.Copy(pixels, sourceIndex, flippedPixels, destIndex, cropWidth);
+        }
 
-        RaycastHit hit;
-        if (Physics.Raycast(ray, out hit, length))
-            to = hit.point;
-
-        return to;
+        inputTexture.SetPixels(flippedPixels);
+        inputTexture.Apply();
     }
-
-    public RaycastHit shootLaserRaycastHit(Vector3 from, Vector3 direction, float length, Material mat = null)
-    {
-        Ray ray = new Ray(from, direction);
-        Vector3 to = from + length * direction;
-
-        RaycastHit hit;
-        if (Physics.Raycast(ray, out hit, length))
-            to = hit.point;
-
-        return hit;
-    }
-
-    public Vector3 GenerateBoundingBox(PoseEstimationResult det, Matrix4x4 camera2WorldMatrix_local, Matrix4x4 projectionMatrix_local)
-    {
-        var x_offset = (cameraResolutionWidth - inferenceImgSize) / 2;
-        var y_offset = (cameraResolutionHeight - inferenceImgSize) / 2;
-
-        Vector3 direction = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2(det.Bbox.X + x_offset, det.Bbox.Y + y_offset));
-        var centerHit = shootLaserRaycastHit(camera2WorldMatrix_local.GetColumn(3), direction, 10f);
-
-        var distance = centerHit.distance;
-        distance -= 0.05f;
-
-        Vector3 corner_0 = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2((det.Bbox.X + x_offset) - (det.Bbox.Width / 2), det.Bbox.Y + y_offset - (det.Bbox.Height / 2)));
-        Vector3 corner_1 = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2((det.Bbox.X + x_offset) - (det.Bbox.Width / 2), det.Bbox.Y + y_offset + (det.Bbox.Height / 2)));
-        Vector3 corner_2 = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2((det.Bbox.X + x_offset) + (det.Bbox.Width / 2), det.Bbox.Y + y_offset - (det.Bbox.Height / 2)));
-        Vector3 corner_3 = LocatableCameraUtils.PixelCoordToWorldCoord(camera2WorldMatrix_local, projectionMatrix_local, resolution, new Vector2((det.Bbox.X + x_offset) + (det.Bbox.Width / 2), det.Bbox.Y + y_offset + (det.Bbox.Height / 2)));
-
-        var point_0 = shootLaserFrom(camera2WorldMatrix_local.GetColumn(3), corner_0, distance);
-        var point_1 = shootLaserFrom(camera2WorldMatrix_local.GetColumn(3), corner_1, distance);
-        var point_2 = shootLaserFrom(camera2WorldMatrix_local.GetColumn(3), corner_2, distance);
-        var point_3 = shootLaserFrom(camera2WorldMatrix_local.GetColumn(3), corner_3, distance);
-
-        var go = new GameObject();
-
-        go.transform.position = point_0;
-        go.transform.rotation = Camera.main.transform.rotation;
-
-        var renderer = go.GetComponent<Renderer>();
-
-        LineRenderer lr = go.AddComponent<LineRenderer>();
-        lr.widthMultiplier = 0.01f;
-        lr.loop = true;
-        lr.positionCount = 4;
-        lr.material = laserMaterial;
-        lr.material.color = Color.red;
-
-        lr.SetPosition(0, point_0);
-        lr.SetPosition(3, point_1);
-        lr.SetPosition(1, point_2);
-        lr.SetPosition(2, point_3);
-
-        // Debug.Log($"Długość generowanej linii: {distance}");
-        
-        labels.Add(Tuple.Create(go, renderer));
-
-        return centerHit.point;
-    }
-
-private void CropTexture(int cropWidth, int cropHeight)
-{
-    int centerX = pictureTexture.width / 2 - cropWidth / 2;
-    int centerY = pictureTexture.height / 2 - cropHeight / 2;
-    Color[] pixels = pictureTexture.GetPixels(centerX, centerY, cropWidth, cropHeight);
-    int totalPixels = cropWidth * cropHeight;
-    Color[] flippedPixels = new Color[totalPixels];
-    // Flip the pixels horizontally
-    for (int y = 0; y < cropHeight; y++)
-    {
-        int sourceIndex = y * cropWidth;
-        int destIndex = (cropHeight - 1 - y) * cropWidth;
-        Array.Copy(pixels, sourceIndex, flippedPixels, destIndex, cropWidth);
-    }
-
-    inputTexture.SetPixels(flippedPixels);
-    inputTexture.Apply();
-}
 
 
 }

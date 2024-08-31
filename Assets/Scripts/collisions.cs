@@ -4,10 +4,10 @@ using UnityEngine;
 
 public class collisions : MonoBehaviour
 {
-   // Start is called before the first frame update
-   private Detection detectionScript;
-   private int counter_left = 0;
-   private int counter_right = 0;
+   
+   private Detection detectionScript;  // main script to trigger collision
+   private int counter_left = 0;       // counts frames of collision with left leg
+   private int counter_right = 0;      // counts frames of collision with right leg
    private bool trigger_delete = false;
 
    
@@ -23,14 +23,10 @@ public class collisions : MonoBehaviour
          if (collision.CompareTag("left_step"))
          {
             detectionScript.SetIsCollision(true);
-            detectionScript.GetTriggeringObjectName(collision.gameObject.name);
-            // Debug.Log("OOOOOOOOOOOOOOOOOOOOO  Entered collision with " + collision.gameObject.name);
          }
          else if (collision.CompareTag("right_step"))
          {
             detectionScript.SetIsCollision(true);
-            detectionScript.GetTriggeringObjectName(collision.gameObject.name);
-            // Debug.Log("LLLLLLLLLLLLLLLLLLLLLL  Entered collision with " + collision.gameObject.name);
          }
       }
    }
@@ -39,9 +35,10 @@ public class collisions : MonoBehaviour
    {
       if (detectionScript != null)
       {
-         if (collision.CompareTag("left_step"))
+         // updates counter, without setting collision
+         if (collision.CompareTag("left_step"))    
          {
-            detectionScript.SetIsCollision(false);
+            detectionScript.SetIsCollision(false);    
             counter_left += 1;
          }
          else if (collision.CompareTag("right_step"))
@@ -50,23 +47,27 @@ public class collisions : MonoBehaviour
             counter_right += 1;
          }
 
+         // set bool to true if any leg is in collision for over 10 frames
          if ((collision.CompareTag("left_step") && counter_left >= 10) || (collision.CompareTag("right_step") && counter_right >= 10))
          {
             trigger_delete = true;  
          }
          
-         if(trigger_delete)
+         // resets collision state
+         if(trigger_delete)     
          {
             detectionScript.SetIsCollision(false);
-            detectionScript.DeleteOldestStep();
+            // trigger last step delete in main script
+            detectionScript.DeleteOldestStep();    
             counter_left = 0;
             counter_right = 0;
-            trigger_delete = false;
+            trigger_delete = false; 
          }
       }
    }
 
-   void OnTriggerExit(Collider collision)
+   // reset state after exiting collision
+   void OnTriggerExit(Collider collision)    
    {
       if (detectionScript != null)
       {

@@ -4,9 +4,9 @@ using UnityEngine;
 
 public class Hole_Collision : MonoBehaviour
 {
-    private Detection detectionScript;
+    private Detection detectionScript;      // main script to trigger collision
 
-    // Start is called before the first frame update
+    
     void Start()
     {
         detectionScript = FindAnyObjectByType<Detection>();
@@ -16,7 +16,8 @@ public class Hole_Collision : MonoBehaviour
     {
         if (detectionScript != null)
         {
-            if (collision.CompareTag("left_step") || collision.CompareTag("right_step"))
+            // both legs will trigger collision with obstacle
+            if (collision.CompareTag("left_step") || collision.CompareTag("right_step"))    
             {
                 detectionScript.SetHoleCollision(true);
             }
@@ -27,7 +28,8 @@ public class Hole_Collision : MonoBehaviour
     {
         if (detectionScript != null)
         {
-            if (collision.CompareTag("left_step") || collision.CompareTag("right_step"))
+            // resets collision status
+            if (collision.CompareTag("left_step") || collision.CompareTag("right_step"))    
             {
                 detectionScript.SetHoleCollision(false);
             }
