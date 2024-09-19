@@ -6,7 +6,7 @@ This GitHub repository contains the source code for an augmented reality (AR) ap
 
 ## Video demo application
 
-[![YouTube](http://i.ytimg.com/vi/fpK5MiNjmME/hqdefault.jpg)](https://www.youtube.com/watch?v=fpK5MiNjmME)
+[![YouTube](http://i.ytimg.com/vi/fpK5MiNjmME/hqdefault.jpg)](https://www.youtube.com/watch?v=eXbP4SGSvM8&t=0s)
 
 ## Code Summary
 
